@@ -1,0 +1,25 @@
+{
+  "visual": {
+    "name": "graficoLinhaProjecao",
+    "displayName": "Grafico Linha com Projecao",
+    "guid": "graficoLinhaProjecaoA1B2C3D4E5F6",
+    "visualClassName": "Visual",
+    "version": "1.0.0.0",
+    "description": "Grafico de linha customizavel com ate 5 series, projecao automatica (linha tracejada) apos o ultimo ponto da serie principal, linha de meta e personalizacao completa via painel. Suporta formatos de numero (decimal, percentual, monetario, abreviacao mil/mi/bi), tipos de linha (solida/tracejada/pontilhada), eixos configuraveis e cores totalmente editaveis com suporte a fx (cores dinamicas via DAX).",
+    "supportUrl": "https://app.powerbi.com",
+    "gitHubUrl": ""
+  },
+  "apiVersion": "5.9.0",
+  "author": {
+    "name": "Rodrigo de Souza Barbosa",
+    "email": "rodzbar@outlook.com"
+  },
+  "assets": {
+    "icon": "assets/icon.png"
+  },
+  "externalJS": [],
+  "style": "style/visual.less",
+  "capabilities": "capabilities.json",
+  "dependencies": null,
+  "stringResources": []
+}
