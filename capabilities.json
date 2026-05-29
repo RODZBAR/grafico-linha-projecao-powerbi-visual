@@ -3,7 +3,7 @@
   "dataRoles": [
     { "displayName": "Referencia", "name": "referencia", "kind": "GroupingOrMeasure" },
     { "displayName": "Eixo Y (Resultado)", "name": "resultado", "kind": "Measure" },
-    { "displayName": "Cor da Linha (medida)", "name": "corResultado", "kind": "Measure" },
+    { "displayName": "Cor por Medida DAX (opcional)", "name": "corResultado", "kind": "Measure" },
     { "displayName": "Projecao - Valor", "name": "projecaoValor", "kind": "Measure" },
     { "displayName": "Projecao - Rotulo", "name": "projecaoRotulo", "kind": "GroupingOrMeasure" },
     { "displayName": "Meta", "name": "meta", "kind": "Measure" }

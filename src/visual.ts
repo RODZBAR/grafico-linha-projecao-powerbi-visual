@@ -7,6 +7,8 @@ import { VisualFormattingSettingsModel } from "./settings";
 import { formatarValor, ehNumeroValido, OpcoesFormato, TipoFormato } from "./numberFormatter";
 import { formatarPeriodo } from "./dateFormatter";
 
+const VERSAO_VISUAL = "v1.0.2";
+
 import IVisual = powerbi.extensibility.visual.IVisual;
 import VisualConstructorOptions = powerbi.extensibility.visual.VisualConstructorOptions;
 import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
@@ -623,6 +625,14 @@ export class Visual implements IVisual {
         if (lerBool(cfg.diagnostico.exibir, false)) {
             this.renderDiagnostico(dv, categoria, coresPorIdx, algumaPorLinha, origemCor, valCorResultado, w);
         }
+
+        // ===== Versao (sempre visivel no canto, discreta) =====
+        this.gRoot.append("text")
+            .attr("x", w - 4).attr("y", h - 2)
+            .attr("text-anchor", "end")
+            .attr("font-family", "Consolas, monospace").attr("font-size", 8)
+            .attr("fill", "#9CA3AF").attr("opacity", 0.6)
+            .text(VERSAO_VISUAL);
     }
 
     private renderDiagnostico(
