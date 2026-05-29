@@ -128,7 +128,13 @@
     },
     "resultado": {
       "properties": {
-        "cor": { "type": { "fill": { "solid": { "color": true } } } },
+        "cor": {
+          "type": { "fill": { "solid": { "color": true } } },
+          "rule": {
+            "inputRole": "resultado",
+            "output": { "property": "cor" }
+          }
+        },
         "espessura": { "type": { "numeric": true } },
         "tipoLinha": {
           "type": {
@@ -154,7 +160,13 @@
     "projecao": {
       "properties": {
         "exibir": { "type": { "bool": true } },
-        "cor": { "type": { "fill": { "solid": { "color": true } } } },
+        "cor": {
+          "type": { "fill": { "solid": { "color": true } } },
+          "rule": {
+            "inputRole": "projecaoValor",
+            "output": { "property": "cor" }
+          }
+        },
         "espessura": { "type": { "numeric": true } },
         "tipoLinha": {
           "type": {
@@ -174,7 +186,13 @@
     "meta": {
       "properties": {
         "exibir": { "type": { "bool": true } },
-        "cor": { "type": { "fill": { "solid": { "color": true } } } },
+        "cor": {
+          "type": { "fill": { "solid": { "color": true } } },
+          "rule": {
+            "inputRole": "meta",
+            "output": { "property": "cor" }
+          }
+        },
         "espessura": { "type": { "numeric": true } },
         "tipoLinha": {
           "type": {
@@ -233,7 +251,13 @@
         "fontBold": { "type": { "bool": true } },
         "fontItalic": { "type": { "bool": true } },
         "fontUnderline": { "type": { "bool": true } },
-        "cor": { "type": { "fill": { "solid": { "color": true } } } },
+        "cor": {
+          "type": { "fill": { "solid": { "color": true } } },
+          "rule": {
+            "inputRole": "resultado",
+            "output": { "property": "cor" }
+          }
+        },
         "deslocamentoY": { "type": { "numeric": true } },
         "tipoFormato": {
           "type": {

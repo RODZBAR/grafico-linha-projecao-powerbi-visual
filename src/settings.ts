@@ -6,6 +6,7 @@ import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
 import Card = formattingSettings.SimpleCard;
 import Model = formattingSettings.Model;
 import ValidatorType = powerbi.visuals.ValidatorType;
+import VisualEnumerationInstanceKinds = powerbi.VisualEnumerationInstanceKinds;
 
 const FONTE_PADRAO = "Segoe UI, sans-serif";
 
@@ -83,6 +84,17 @@ function cor(name: string, displayName: string, hex: string): formattingSettings
         name,
         displayName,
         value: { value: hex }
+    });
+}
+
+// ColorPicker com o botao fx ativado (Constant or Rule):
+// permite o usuario escolher entre cor fixa, gradiente, regra ou medida DAX.
+function corFx(name: string, displayName: string, hex: string): formattingSettings.ColorPicker {
+    return new formattingSettings.ColorPicker({
+        name,
+        displayName,
+        value: { value: hex },
+        instanceKind: VisualEnumerationInstanceKinds.ConstantOrRule
     });
 }
 
@@ -189,7 +201,7 @@ class GridCard extends Card {
 
 /* =========================== Resultado (serie principal) =========================== */
 class ResultadoCard extends Card {
-    cor = cor("cor", "Cor da linha", "#3B82F6");
+    cor = corFx("cor", "Cor da linha", "#3B82F6");
     espessura = numero("espessura", "Espessura", 3, 0.5, 20);
     tipoLinha = dropdown("tipoLinha", "Tipo de linha", TIPOS_LINHA, 0);
     curva = dropdown("curva", "Curva", TIPOS_CURVA, 0);
@@ -201,7 +213,7 @@ class ResultadoCard extends Card {
 /* =========================== Projecao =========================== */
 class ProjecaoCard extends Card {
     exibir = toggle("exibir", "Exibir projecao", true);
-    cor = cor("cor", "Cor da linha", "#3B82F6");
+    cor = corFx("cor", "Cor da linha", "#3B82F6");
     espessura = numero("espessura", "Espessura", 3, 0.5, 20);
     tipoLinha = dropdown("tipoLinha", "Tipo de linha", TIPOS_LINHA, 1);
     exibirMarcador = toggle("exibirMarcador", "Exibir marcador no ponto final", true);
@@ -215,7 +227,7 @@ class ProjecaoCard extends Card {
 /* =========================== Meta =========================== */
 class MetaCard extends Card {
     exibir = toggle("exibir", "Exibir linha de meta", true);
-    cor = cor("cor", "Cor da linha", "#9CA3AF");
+    cor = corFx("cor", "Cor da linha", "#9CA3AF");
     espessura = numero("espessura", "Espessura", 2, 0.5, 10);
     tipoLinha = dropdown("tipoLinha", "Tipo de linha", TIPOS_LINHA, 1);
     exibirRotulo = toggle("exibirRotulo", "Exibir rotulo da meta", true);
@@ -258,7 +270,7 @@ class RotulosValorCard extends Card {
     fontBold = toggle("fontBold", "Negrito", true);
     fontItalic = toggle("fontItalic", "Italico", false);
     fontUnderline = toggle("fontUnderline", "Sublinhado", false);
-    cor = cor("cor", "Cor", "#111827");
+    cor = corFx("cor", "Cor", "#111827");
     deslocamentoY = numero("deslocamentoY", "Deslocamento vertical", -10, -80, 80);
     tipoFormato = dropdown("tipoFormato", "Tipo de formato", TIPOS_FORMATO, 0);
     casasDecimais = numero("casasDecimais", "Casas decimais", 1, 0, 6);
