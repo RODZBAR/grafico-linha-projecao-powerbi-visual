@@ -18,10 +18,13 @@
           "meta": { "max": 1 }
         }
       ],
-      "table": {
-        "rows": {
+      "categorical": {
+        "categories": {
+          "for": { "in": "referencia" },
+          "dataReductionAlgorithm": { "top": { "count": 30000 } }
+        },
+        "values": {
           "select": [
-            { "bind": { "to": "referencia" } },
             { "bind": { "to": "resultado" } },
             { "bind": { "to": "projecaoValor" } },
             { "bind": { "to": "projecaoRotulo" } },
@@ -131,7 +134,7 @@
         "cor": {
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
-            "inputRole": "resultado",
+            "inputRole": "referencia",
             "output": { "property": "cor" }
           }
         },
@@ -163,7 +166,7 @@
         "cor": {
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
-            "inputRole": "projecaoValor",
+            "inputRole": "referencia",
             "output": { "property": "cor" }
           }
         },
@@ -189,7 +192,7 @@
         "cor": {
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
-            "inputRole": "meta",
+            "inputRole": "referencia",
             "output": { "property": "cor" }
           }
         },
@@ -242,6 +245,11 @@
         "espessuraBorda": { "type": { "numeric": true } }
       }
     },
+    "diagnostico": {
+      "properties": {
+        "exibir": { "type": { "bool": true } }
+      }
+    },
     "rotulosValor": {
       "properties": {
         "exibir": { "type": { "bool": true } },
@@ -254,7 +262,7 @@
         "cor": {
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
-            "inputRole": "resultado",
+            "inputRole": "referencia",
             "output": { "property": "cor" }
           }
         },

@@ -287,6 +287,14 @@ class RotulosValorCard extends Card {
     ];
 }
 
+/* =========================== Diagnostico (debug) =========================== */
+class DiagnosticoCard extends Card {
+    exibir = toggle("exibir", "Exibir diagnostico do dataView", false);
+    name = "diagnostico";
+    displayName = "Diagnostico (debug fx)";
+    slices = [this.exibir];
+}
+
 /* =========================== Modelo =========================== */
 export class VisualFormattingSettingsModel extends Model {
     layout = new LayoutCard();
@@ -298,10 +306,12 @@ export class VisualFormattingSettingsModel extends Model {
     meta = new MetaCard();
     marcadores = new MarcadoresCard();
     rotulosValor = new RotulosValorCard();
+    diagnostico = new DiagnosticoCard();
     cards = [
         this.layout,
         this.eixoX, this.eixoY, this.grid,
         this.resultado, this.projecao, this.meta,
-        this.marcadores, this.rotulosValor
+        this.marcadores, this.rotulosValor,
+        this.diagnostico
     ];
 }

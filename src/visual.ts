@@ -12,43 +12,21 @@ import VisualConstructorOptions = powerbi.extensibility.visual.VisualConstructor
 import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
 import IVisualHost = powerbi.extensibility.visual.IVisualHost;
 import DataView = powerbi.DataView;
-
-interface ColunaInfo {
-    indice: number;
-    formato: string | undefined;
-    nome: string;
-}
+import DataViewCategoryColumn = powerbi.DataViewCategoryColumn;
+import DataViewValueColumn = powerbi.DataViewValueColumn;
 
 interface PontoSerie {
     indice: number;
     rotuloEixoX: string;
     valor: number | null;
-    valorOriginal: any;
     metaValor: number | null;
 }
 
 interface ProjecaoInfo {
-    valorOriginal: any;
     valorNumerico: number;
     rotulo: string;
     indiceUltimoValido: number;
     valorUltimoValido: number;
-}
-
-function mapearColunas(dv: DataView): { [role: string]: ColunaInfo } {
-    const mapa: { [role: string]: ColunaInfo } = {};
-    if (!dv || !dv.table || !dv.table.columns) return mapa;
-    const cols = dv.table.columns;
-    for (let i = 0; i < cols.length; i++) {
-        const c = cols[i];
-        if (!c.roles) continue;
-        for (const r in c.roles) {
-            if (c.roles[r] && !mapa[r]) {
-                mapa[r] = { indice: i, formato: c.format, nome: c.displayName };
-            }
-        }
-    }
-    return mapa;
 }
 
 function numOuNull(v: any): number | null {
@@ -74,10 +52,6 @@ function curvaD3(tipo: string): d3.CurveFactory {
     }
 }
 
-// ColorPicker.value pode ser:
-//   - {value: "#hex"}   (caminho normal apos populate)
-//   - string "#hex"      (alguns casos)
-//   - {value: {value: "#hex"}} (raro, mas defensivo)
 function lerCor(picker: any, fallback: string): string {
     if (!picker) return fallback;
     let v: any = picker.value;
@@ -127,9 +101,7 @@ function opcoesFormatoDeCard(card: any): OpcoesFormato {
     };
 }
 
-// ============= Leitura de cores calculadas pelo fx do Power BI =============
-// Quando o usuario aplica regra/medida/gradiente via fx, o PBI envia a cor
-// calculada em locais diferentes do dataView. Estas funcoes tentam encontrar.
+/* ============= Leitura de cores conditional formatting ============= */
 
 function extrairCor(o: any): string | null {
     if (o === null || o === undefined) return null;
@@ -142,37 +114,61 @@ function extrairCor(o: any): string | null {
     return null;
 }
 
-// Cor "global" calculada: metadata.objects.<objName>.<propName>
+// Cor global (medida que retorna 1 cor, regra simples)
 function lerCorGlobalDV(dv: DataView, objectName: string, propertyName: string): string | null {
     const objs: any = dv && dv.metadata && (dv.metadata as any).objects;
     return extrairCor(objs && objs[objectName] && objs[objectName][propertyName]);
 }
 
-// Cor por linha (gradient/cor por valor): row.objects.<objName>.<propName>
-function lerCorRow(row: any, objectName: string, propertyName: string): string | null {
-    if (!row || !row.objects) return null;
-    const obj = row.objects[objectName];
-    if (!obj) return null;
-    return extrairCor(obj[propertyName]);
+// Cor por categoria (gradient, regra por valor da categoria)
+// Em categorical mapping, fica em categories[0].objects[idx][objectName][propertyName]
+function lerCorPorCategoria(categoria: DataViewCategoryColumn | null, idx: number, objectName: string, propertyName: string): string | null {
+    if (!categoria || !categoria.objects) return null;
+    const o = categoria.objects[idx];
+    if (!o) return null;
+    return extrairCor((o as any)[objectName] && (o as any)[objectName][propertyName]);
 }
 
-// Resolve a cor "global" (constante, regra, medida) com fallback
-function resolverCor(dv: DataView, objectName: string, propertyName: string, fallback: string): string {
-    return lerCorGlobalDV(dv, objectName, propertyName) || fallback;
+function resolverCor(dv: DataView, categoria: DataViewCategoryColumn | null, objectName: string, propertyName: string, fallback: string): string {
+    // Tenta global primeiro (cor unica)
+    const global = lerCorGlobalDV(dv, objectName, propertyName);
+    if (global) return global;
+    // Tenta primeira cor por categoria (se houver, usa como representante)
+    if (categoria && categoria.objects) {
+        for (let i = 0; i < categoria.values.length; i++) {
+            const c = lerCorPorCategoria(categoria, i, objectName, propertyName);
+            if (c) return c;
+        }
+    }
+    return fallback;
 }
 
-// Cores por ponto: para cada linha do dataView retorna a cor calculada.
-// Se nao houver cor por linha, usa a cor global. Se nao houver, fallback.
-function coresPorPonto(dv: DataView, objectName: string, propertyName: string, fallback: string): { cores: string[]; algumaPorLinha: boolean } {
-    const rows = (dv && dv.table && dv.table.rows) || [];
-    const corGlobal = lerCorGlobalDV(dv, objectName, propertyName) || fallback;
+function coresPorCategoria(dv: DataView, categoria: DataViewCategoryColumn | null, objectName: string, propertyName: string, fallback: string): { cores: string[]; algumaPorLinha: boolean } {
+    const n = categoria && categoria.values ? categoria.values.length : 0;
+    const corGlobal = lerCorGlobalDV(dv, objectName, propertyName);
     let algumaPorLinha = false;
-    const cores = rows.map(r => {
-        const c = lerCorRow(r, objectName, propertyName);
-        if (c) { algumaPorLinha = true; return c; }
-        return corGlobal;
-    });
+    const cores: string[] = [];
+    for (let i = 0; i < n; i++) {
+        const c = lerCorPorCategoria(categoria, i, objectName, propertyName);
+        if (c) {
+            algumaPorLinha = true;
+            cores.push(c);
+        } else {
+            cores.push(corGlobal || fallback);
+        }
+    }
     return { cores, algumaPorLinha };
+}
+
+/* ============= Helpers para localizar values por role ============= */
+
+function valuePorRole(values: powerbi.DataViewValueColumns | undefined, role: string): DataViewValueColumn | null {
+    if (!values) return null;
+    for (let i = 0; i < values.length; i++) {
+        const v: any = values[i];
+        if (v && v.source && v.source.roles && v.source.roles[role]) return v;
+    }
+    return null;
 }
 
 export class Visual implements IVisual {
@@ -214,44 +210,53 @@ export class Visual implements IVisual {
 
         const cfg = this.formattingSettings;
 
-        if (!dv || !dv.table || !dv.table.rows || dv.table.rows.length === 0) {
+        if (!dv || !dv.categorical) {
             this.renderMensagem(w, h, "Arraste campos para Referencia e Eixo Y (Resultado).");
             return;
         }
 
-        const mapa = mapearColunas(dv);
-        if (!mapa["referencia"]) {
+        const cat = dv.categorical;
+        const categoria: DataViewCategoryColumn | null = (cat.categories && cat.categories[0]) || null;
+
+        if (!categoria) {
             this.renderMensagem(w, h, "Defina o campo Referencia (eixo X).");
             return;
         }
-        if (!mapa["resultado"]) {
+
+        const valResultado = valuePorRole(cat.values, "resultado");
+        if (!valResultado) {
             this.renderMensagem(w, h, "Defina o campo Eixo Y (Resultado).");
             return;
         }
 
-        // ===== Constroi os pontos =====
-        const formatoData = lerEnum(cfg.eixoX.formatoData, "auto");
-        const rows = dv.table.rows;
-        const idxRef = mapa["referencia"].indice;
-        const idxRes = mapa["resultado"].indice;
-        const idxMeta = mapa["meta"] ? mapa["meta"].indice : -1;
+        const valProjecao = valuePorRole(cat.values, "projecaoValor");
+        const valProjecaoRot = valuePorRole(cat.values, "projecaoRotulo");
+        const valMeta = valuePorRole(cat.values, "meta");
 
-        const pontos: PontoSerie[] = rows.map((linha, idx) => {
-            const v = linha[idxRes];
-            const m = idxMeta >= 0 ? linha[idxMeta] : null;
-            return {
-                indice: idx,
-                rotuloEixoX: formatarPeriodo(linha[idxRef], formatoData),
-                valor: numOuNull(v),
-                valorOriginal: v,
-                metaValor: numOuNull(m)
-            };
-        });
+        const formatoData = lerEnum(cfg.eixoX.formatoData, "auto");
+        const formatoColRef = categoria.source ? categoria.source.format : undefined;
+        const formatoColResultado = valResultado.source ? valResultado.source.format : undefined;
+
+        const n = categoria.values.length;
+        const pontos: PontoSerie[] = [];
+        for (let i = 0; i < n; i++) {
+            const ref = categoria.values[i];
+            pontos.push({
+                indice: i,
+                rotuloEixoX: formatarPeriodo(ref, formatoData),
+                valor: numOuNull(valResultado.values[i]),
+                metaValor: valMeta ? numOuNull(valMeta.values[i]) : null
+            });
+        }
 
         // ===== Projecao =====
         let projecao: ProjecaoInfo | null = null;
-        if (lerBool(cfg.projecao.exibir, true) && mapa["projecaoValor"]) {
-            const valorProj = rows[0][mapa["projecaoValor"].indice];
+        if (lerBool(cfg.projecao.exibir, true) && valProjecao) {
+            // Pega primeiro valor nao nulo
+            let valorProj: any = null;
+            for (let i = 0; i < n; i++) {
+                if (ehNumeroValido(valProjecao.values[i])) { valorProj = valProjecao.values[i]; break; }
+            }
             const valorNum = numOuNull(valorProj);
             if (valorNum !== null) {
                 let idxUltimo = -1;
@@ -261,14 +266,13 @@ export class Visual implements IVisual {
                 }
                 if (idxUltimo >= 0) {
                     let rotulo = lerTexto(cfg.projecao.rotuloPadrao, "Projecao");
-                    if (mapa["projecaoRotulo"]) {
-                        const v = rows[0][mapa["projecaoRotulo"].indice];
-                        if (v !== null && v !== undefined && String(v).length > 0) {
-                            rotulo = String(v);
+                    if (valProjecaoRot) {
+                        for (let i = 0; i < n; i++) {
+                            const v = valProjecaoRot.values[i];
+                            if (v !== null && v !== undefined && String(v).length > 0) { rotulo = String(v); break; }
                         }
                     }
                     projecao = {
-                        valorOriginal: valorProj,
                         valorNumerico: valorNum,
                         rotulo,
                         indiceUltimoValido: idxUltimo,
@@ -284,13 +288,7 @@ export class Visual implements IVisual {
         const mEsq = Math.max(0, lerNumero(cfg.layout.margemEsquerda, 60));
         const mDir = Math.max(0, lerNumero(cfg.layout.margemDireita, 30));
 
-        const plot = {
-            x0: mEsq,
-            x1: w - mDir,
-            y0: mTopo,
-            y1: h - mBase
-        };
-
+        const plot = { x0: mEsq, x1: w - mDir, y0: mTopo, y1: h - mBase };
         if (plot.x1 <= plot.x0 + 10 || plot.y1 <= plot.y0 + 10) {
             this.renderMensagem(w, h, "Espaco insuficiente. Ajuste as margens.");
             return;
@@ -306,13 +304,9 @@ export class Visual implements IVisual {
             projecao.rotulo = rot;
             dominioX.push(rot);
         }
+        const escalaX = d3.scalePoint<string>().domain(dominioX).range([plot.x0, plot.x1]).padding(0.5);
 
-        const escalaX = d3.scalePoint<string>()
-            .domain(dominioX)
-            .range([plot.x0, plot.x1])
-            .padding(0.5);
-
-        // ===== Escala Y (inclui resultado, meta e projecao) =====
+        // ===== Escala Y =====
         const vals: number[] = [];
         for (const p of pontos) {
             if (p.valor !== null) vals.push(p.valor);
@@ -330,10 +324,7 @@ export class Visual implements IVisual {
         const padding = (yMax - yMin) * 0.08;
         if (minimoAuto) yMin = yMin - padding;
         if (maximoAuto) yMax = yMax + padding;
-
-        const escalaY = d3.scaleLinear()
-            .domain([yMin, yMax])
-            .range([plot.y1, plot.y0]);
+        const escalaY = d3.scaleLinear().domain([yMin, yMax]).range([plot.y1, plot.y0]);
 
         // ===== Grid =====
         const exibirGridX = lerBool(cfg.grid.exibirX, false);
@@ -344,16 +335,13 @@ export class Visual implements IVisual {
             const tipoGrid = lerEnum(cfg.grid.tipoLinhaGrid, "solid");
             const dashGrid = dashArray(tipoGrid, espGrid);
             if (exibirGridY) {
-                const ticks = escalaY.ticks(5);
-                for (const t of ticks) {
+                for (const t of escalaY.ticks(5)) {
                     const y = escalaY(t);
                     this.gRoot.append("line")
                         .attr("x1", plot.x0).attr("x2", plot.x1)
                         .attr("y1", y).attr("y2", y)
-                        .attr("stroke", corGrid)
-                        .attr("stroke-width", espGrid)
-                        .attr("stroke-dasharray", dashGrid)
-                        .attr("shape-rendering", "crispEdges");
+                        .attr("stroke", corGrid).attr("stroke-width", espGrid)
+                        .attr("stroke-dasharray", dashGrid).attr("shape-rendering", "crispEdges");
                 }
             }
             if (exibirGridX) {
@@ -361,12 +349,9 @@ export class Visual implements IVisual {
                     const x = escalaX(rot);
                     if (x === undefined) continue;
                     this.gRoot.append("line")
-                        .attr("x1", x).attr("x2", x)
-                        .attr("y1", plot.y0).attr("y2", plot.y1)
-                        .attr("stroke", corGrid)
-                        .attr("stroke-width", espGrid)
-                        .attr("stroke-dasharray", dashGrid)
-                        .attr("shape-rendering", "crispEdges");
+                        .attr("x1", x).attr("x2", x).attr("y1", plot.y0).attr("y2", plot.y1)
+                        .attr("stroke", corGrid).attr("stroke-width", espGrid)
+                        .attr("stroke-dasharray", dashGrid).attr("shape-rendering", "crispEdges");
                 }
             }
         }
@@ -377,20 +362,19 @@ export class Visual implements IVisual {
             if (valoresMeta.length > 0) {
                 const metaValor = valoresMeta[0];
                 const yMeta = escalaY(metaValor);
-                const corMeta = resolverCor(dv, "meta", "cor", lerCor(cfg.meta.cor, "#9CA3AF"));
+                const corMeta = resolverCor(dv, categoria, "meta", "cor", lerCor(cfg.meta.cor, "#9CA3AF"));
                 const espMeta = Math.max(0.5, lerNumero(cfg.meta.espessura, 2));
                 const tipoMeta = lerEnum(cfg.meta.tipoLinha, "dash");
                 this.gRoot.append("line")
                     .attr("x1", plot.x0).attr("x2", plot.x1)
                     .attr("y1", yMeta).attr("y2", yMeta)
-                    .attr("stroke", corMeta)
-                    .attr("stroke-width", espMeta)
+                    .attr("stroke", corMeta).attr("stroke-width", espMeta)
                     .attr("stroke-dasharray", dashArray(tipoMeta, espMeta))
                     .attr("stroke-linecap", "round");
 
                 if (lerBool(cfg.meta.exibirRotulo, true)) {
                     const rotuloBase = lerTexto(cfg.meta.rotuloTexto, "Meta");
-                    const metaFormatoColuna = mapa["meta"] ? mapa["meta"].formato : undefined;
+                    const metaFormatoColuna = valMeta && valMeta.source ? valMeta.source.format : undefined;
                     const optsY = opcoesFormatoDeCard(cfg.eixoY);
                     const incluirValor = lerBool(cfg.meta.exibirValor, true);
                     const textoVal = incluirValor ? formatarValor(metaValor, optsY, metaFormatoColuna) : "";
@@ -409,32 +393,25 @@ export class Visual implements IVisual {
                     else { xR = plot.x1 - 4; anchor = "end"; yR = yMeta - 4; }
 
                     this.gRoot.append("text")
-                        .attr("x", xR).attr("y", yR)
-                        .attr("text-anchor", anchor)
-                        .attr("font-family", family)
-                        .attr("font-size", size)
-                        .attr("font-weight", peso)
-                        .attr("font-style", italico)
-                        .attr("text-decoration", sublin)
-                        .attr("fill", corRot)
+                        .attr("x", xR).attr("y", yR).attr("text-anchor", anchor)
+                        .attr("font-family", family).attr("font-size", size)
+                        .attr("font-weight", peso).attr("font-style", italico)
+                        .attr("text-decoration", sublin).attr("fill", corRot)
                         .text(textoFinal);
                 }
             }
         }
 
-        // ===== Linha do Resultado (com suporte a fx: cores por ponto) =====
+        // ===== Linha do Resultado (com cores por ponto se fx) =====
         const corResultadoFallback = lerCor(cfg.resultado.cor, "#3B82F6");
-        const { cores: coresPorIdx, algumaPorLinha } = coresPorPonto(dv, "resultado", "cor", corResultadoFallback);
-        const corResultado = coresPorIdx.length > 0 ? coresPorIdx[coresPorIdx.length - 1] : corResultadoFallback;
+        const { cores: coresPorIdx, algumaPorLinha } = coresPorCategoria(dv, categoria, "resultado", "cor", corResultadoFallback);
+        const corResultado = coresPorIdx.length > 0 ? coresPorIdx[0] : corResultadoFallback;
         const espResultado = Math.max(0.5, lerNumero(cfg.resultado.espessura, 3));
         const tipoResultado = lerEnum(cfg.resultado.tipoLinha, "solid");
         const curvaResultado = lerEnum(cfg.resultado.curva, "linear");
-        const formatoColResultado = mapa["resultado"].formato;
 
         const lineGen = d3.line<{ x: number; y: number }>()
-            .x(d => d.x)
-            .y(d => d.y)
-            .curve(curvaD3(curvaResultado));
+            .x(d => d.x).y(d => d.y).curve(curvaD3(curvaResultado));
 
         const ptsValidos = pontos
             .filter(p => p.valor !== null)
@@ -451,29 +428,21 @@ export class Visual implements IVisual {
 
         if (ptsValidos.length > 0) {
             if (coresDiferentes) {
-                // Renderiza por segmentos retos com cor de cada ponto (perde a curva, mas mostra gradient/regra)
                 for (let i = 0; i < ptsValidos.length - 1; i++) {
                     const a = ptsValidos[i];
                     const b = ptsValidos[i + 1];
                     this.gRoot.append("line")
-                        .attr("x1", a.x).attr("y1", a.y)
-                        .attr("x2", b.x).attr("y2", b.y)
-                        .attr("stroke", a.cor)
-                        .attr("stroke-width", espResultado)
+                        .attr("x1", a.x).attr("y1", a.y).attr("x2", b.x).attr("y2", b.y)
+                        .attr("stroke", a.cor).attr("stroke-width", espResultado)
                         .attr("stroke-dasharray", dashArray(tipoResultado, espResultado))
-                        .attr("stroke-linecap", "round")
-                        .attr("stroke-linejoin", "round");
+                        .attr("stroke-linecap", "round").attr("stroke-linejoin", "round");
                 }
             } else {
-                // Path unico com cor constante (cor unica calculada ou cor do painel)
                 this.gRoot.append("path")
-                    .datum(ptsValidos)
-                    .attr("fill", "none")
-                    .attr("stroke", corResultado)
-                    .attr("stroke-width", espResultado)
+                    .datum(ptsValidos).attr("fill", "none")
+                    .attr("stroke", corResultado).attr("stroke-width", espResultado)
                     .attr("stroke-dasharray", dashArray(tipoResultado, espResultado))
-                    .attr("stroke-linecap", "round")
-                    .attr("stroke-linejoin", "round")
+                    .attr("stroke-linecap", "round").attr("stroke-linejoin", "round")
                     .attr("d", lineGen(ptsValidos));
             }
         }
@@ -496,15 +465,13 @@ export class Visual implements IVisual {
             const xProj = escalaX(projecao.rotulo) || 0;
             const yProj = escalaY(projecao.valorNumerico);
 
-            const corProj = resolverCor(dv, "projecao", "cor", lerCor(cfg.projecao.cor, corResultado));
+            const corProj = resolverCor(dv, categoria, "projecao", "cor", lerCor(cfg.projecao.cor, corResultado));
             const espProj = Math.max(0.5, lerNumero(cfg.projecao.espessura, 3));
             const tipoProj = lerEnum(cfg.projecao.tipoLinha, "dash");
 
             this.gRoot.append("line")
-                .attr("x1", xUlt).attr("x2", xProj)
-                .attr("y1", yUlt).attr("y2", yProj)
-                .attr("stroke", corProj)
-                .attr("stroke-width", espProj)
+                .attr("x1", xUlt).attr("x2", xProj).attr("y1", yUlt).attr("y2", yProj)
+                .attr("stroke", corProj).attr("stroke-width", espProj)
                 .attr("stroke-dasharray", dashArray(tipoProj, espProj))
                 .attr("stroke-linecap", "round");
 
@@ -512,9 +479,7 @@ export class Visual implements IVisual {
                 const tamProj = Math.max(1, lerNumero(cfg.projecao.tamanhoMarcador, 6));
                 this.gRoot.append("circle")
                     .attr("cx", xProj).attr("cy", yProj).attr("r", tamProj)
-                    .attr("fill", corProj)
-                    .attr("stroke", corProj)
-                    .attr("stroke-width", 1);
+                    .attr("fill", corProj).attr("stroke", corProj).attr("stroke-width", 1);
             }
 
             if (lerBool(cfg.marcadores.exibir, false)) {
@@ -522,7 +487,8 @@ export class Visual implements IVisual {
                 const forma = lerEnum(cfg.marcadores.forma, "circle");
                 const preencher = lerBool(cfg.marcadores.preencher, true);
                 const espBorda = Math.max(0, lerNumero(cfg.marcadores.espessuraBorda, 1.5));
-                this.desenharMarcador(xUlt, yUlt, tamMarc, forma, corResultado, preencher, espBorda);
+                const corUlt = coresPorIdx[projecao.indiceUltimoValido] || corResultadoFallback;
+                this.desenharMarcador(xUlt, yUlt, tamMarc, forma, corUlt, preencher, espBorda);
             }
         }
 
@@ -531,7 +497,7 @@ export class Visual implements IVisual {
             const optsRot = opcoesFormatoDeCard(cfg.rotulosValor);
             const apenasUlt = lerBool(cfg.rotulosValor.exibirApenasUltimo, false);
             const desY = lerNumero(cfg.rotulosValor.deslocamentoY, -10);
-            const corRot = resolverCor(dv, "rotulosValor", "cor", lerCor(cfg.rotulosValor.cor, "#111827"));
+            const corRot = resolverCor(dv, categoria, "rotulosValor", "cor", lerCor(cfg.rotulosValor.cor, "#111827"));
             const family = lerFonte(cfg.rotulosValor.fontFamily, "Segoe UI, sans-serif");
             const size = lerNumero(cfg.rotulosValor.fontSize, 11);
             const peso = lerBool(cfg.rotulosValor.fontBold, true) ? "700" : "400";
@@ -541,38 +507,30 @@ export class Visual implements IVisual {
             const alvos = apenasUlt && ptsValidos.length > 0 ? [ptsValidos[ptsValidos.length - 1]] : ptsValidos;
             for (const p of alvos) {
                 this.gRoot.append("text")
-                    .attr("x", p.x).attr("y", p.y + desY)
-                    .attr("text-anchor", "middle")
-                    .attr("font-family", family)
-                    .attr("font-size", size)
-                    .attr("font-weight", peso)
-                    .attr("font-style", italico)
-                    .attr("text-decoration", sublin)
-                    .attr("fill", corRot)
+                    .attr("x", p.x).attr("y", p.y + desY).attr("text-anchor", "middle")
+                    .attr("font-family", family).attr("font-size", size)
+                    .attr("font-weight", peso).attr("font-style", italico)
+                    .attr("text-decoration", sublin).attr("fill", corRot)
                     .text(formatarValor(p.v, optsRot, formatoColResultado));
             }
 
             if (projecao) {
                 const xProj = escalaX(projecao.rotulo) || 0;
                 const yProj = escalaY(projecao.valorNumerico) + desY;
+                const fmtProj = valProjecao && valProjecao.source ? valProjecao.source.format : undefined;
                 this.gRoot.append("text")
-                    .attr("x", xProj).attr("y", yProj)
-                    .attr("text-anchor", "middle")
-                    .attr("font-family", family)
-                    .attr("font-size", size)
-                    .attr("font-weight", peso)
-                    .attr("font-style", italico)
-                    .attr("text-decoration", sublin)
-                    .attr("fill", corRot)
-                    .text(formatarValor(projecao.valorNumerico, optsRot, mapa["projecaoValor"] ? mapa["projecaoValor"].formato : undefined));
+                    .attr("x", xProj).attr("y", yProj).attr("text-anchor", "middle")
+                    .attr("font-family", family).attr("font-size", size)
+                    .attr("font-weight", peso).attr("font-style", italico)
+                    .attr("text-decoration", sublin).attr("fill", corRot)
+                    .text(formatarValor(projecao.valorNumerico, optsRot, fmtProj));
             }
         }
 
         // ===== Eixo X =====
         if (lerBool(cfg.eixoX.exibirLinha, true)) {
             this.gRoot.append("line")
-                .attr("x1", plot.x0).attr("x2", plot.x1)
-                .attr("y1", plot.y1).attr("y2", plot.y1)
+                .attr("x1", plot.x0).attr("x2", plot.x1).attr("y1", plot.y1).attr("y2", plot.y1)
                 .attr("stroke", lerCor(cfg.eixoX.corLinha, "#6B7280"))
                 .attr("stroke-width", Math.max(0.5, lerNumero(cfg.eixoX.espessuraLinha, 1)))
                 .attr("shape-rendering", "crispEdges");
@@ -593,24 +551,18 @@ export class Visual implements IVisual {
                 const t = this.gRoot.append("text")
                     .attr("x", x).attr("y", y)
                     .attr("text-anchor", rotacao === 0 ? "middle" : "end")
-                    .attr("font-family", familyX)
-                    .attr("font-size", sizeX)
-                    .attr("font-weight", pesoX)
-                    .attr("font-style", italicoX)
-                    .attr("text-decoration", sublinX)
-                    .attr("fill", corX)
+                    .attr("font-family", familyX).attr("font-size", sizeX)
+                    .attr("font-weight", pesoX).attr("font-style", italicoX)
+                    .attr("text-decoration", sublinX).attr("fill", corX)
                     .text(rot);
-                if (rotacao !== 0) {
-                    t.attr("transform", `rotate(${rotacao}, ${x}, ${y})`);
-                }
+                if (rotacao !== 0) t.attr("transform", `rotate(${rotacao}, ${x}, ${y})`);
             }
         }
 
         // ===== Eixo Y =====
         if (lerBool(cfg.eixoY.exibirLinha, true)) {
             this.gRoot.append("line")
-                .attr("x1", plot.x0).attr("x2", plot.x0)
-                .attr("y1", plot.y0).attr("y2", plot.y1)
+                .attr("x1", plot.x0).attr("x2", plot.x0).attr("y1", plot.y0).attr("y2", plot.y1)
                 .attr("stroke", lerCor(cfg.eixoY.corLinha, "#6B7280"))
                 .attr("stroke-width", Math.max(0.5, lerNumero(cfg.eixoY.espessuraLinha, 1)))
                 .attr("shape-rendering", "crispEdges");
@@ -635,17 +587,55 @@ export class Visual implements IVisual {
             for (const t of ticks) {
                 const y = escalaY(t);
                 this.gRoot.append("text")
-                    .attr("x", plot.x0 - 6).attr("y", y)
-                    .attr("text-anchor", "end")
+                    .attr("x", plot.x0 - 6).attr("y", y).attr("text-anchor", "end")
                     .attr("dominant-baseline", "central")
-                    .attr("font-family", familyY)
-                    .attr("font-size", sizeY)
-                    .attr("font-weight", pesoY)
-                    .attr("font-style", italicoY)
-                    .attr("text-decoration", sublinY)
-                    .attr("fill", corY)
+                    .attr("font-family", familyY).attr("font-size", sizeY)
+                    .attr("font-weight", pesoY).attr("font-style", italicoY)
+                    .attr("text-decoration", sublinY).attr("fill", corY)
                     .text(formatarValor(t, optsY, formatoColResultado));
             }
+        }
+
+        // ===== Diagnostico (debug fx) =====
+        if (lerBool(cfg.diagnostico.exibir, false)) {
+            this.renderDiagnostico(dv, categoria, coresPorIdx, algumaPorLinha, w);
+        }
+    }
+
+    private renderDiagnostico(dv: DataView, categoria: DataViewCategoryColumn | null, coresPorIdx: string[], algumaPorLinha: boolean, w: number): void {
+        const corGlobal = lerCorGlobalDV(dv, "resultado", "cor");
+        const objs: any = dv && dv.metadata && (dv.metadata as any).objects;
+        const temObjsCategoria = !!(categoria && categoria.objects);
+        const qtdComCor = categoria && categoria.objects ? categoria.objects.filter((o: any) => !!o).length : 0;
+        const amostraCategoria: string[] = [];
+        if (categoria && categoria.objects) {
+            for (let i = 0; i < Math.min(3, categoria.objects.length); i++) {
+                amostraCategoria.push(`[${i}]=` + JSON.stringify(categoria.objects[i] || null).substring(0, 120));
+            }
+        }
+        const linhas = [
+            `[Diagnostico fx]`,
+            `metadata.objects: ${objs ? JSON.stringify(objs).substring(0, 200) : "null"}`,
+            `cor global (metadata.objects.resultado.cor): ${corGlobal || "null"}`,
+            `categoria.objects existe: ${temObjsCategoria} | itens com obj: ${qtdComCor}`,
+            `algumaPorLinha: ${algumaPorLinha}`,
+            `cores resultantes [0..2]: ${coresPorIdx.slice(0, 3).join(", ")}`,
+            ...amostraCategoria
+        ];
+        let y = 12;
+        const x = 6;
+        // Fundo semi-transparente para legibilidade
+        this.gRoot.append("rect")
+            .attr("x", x - 2).attr("y", 2)
+            .attr("width", Math.max(280, w - 12)).attr("height", linhas.length * 12 + 4)
+            .attr("fill", "rgba(255,255,200,0.95)")
+            .attr("stroke", "#888").attr("stroke-width", 0.5);
+        for (const ln of linhas) {
+            this.gRoot.append("text")
+                .attr("x", x).attr("y", y)
+                .attr("font-family", "Consolas, monospace").attr("font-size", 9)
+                .attr("fill", "#111").text(ln);
+            y += 12;
         }
     }
 
@@ -653,23 +643,19 @@ export class Visual implements IVisual {
         const fill = preencher ? cor : "#FFFFFF";
         const stroke = cor;
         if (forma === "circle") {
-            this.gRoot.append("circle")
-                .attr("cx", x).attr("cy", y).attr("r", tamanho)
+            this.gRoot.append("circle").attr("cx", x).attr("cy", y).attr("r", tamanho)
                 .attr("fill", fill).attr("stroke", stroke).attr("stroke-width", espBorda);
         } else if (forma === "square") {
-            this.gRoot.append("rect")
-                .attr("x", x - tamanho).attr("y", y - tamanho)
+            this.gRoot.append("rect").attr("x", x - tamanho).attr("y", y - tamanho)
                 .attr("width", tamanho * 2).attr("height", tamanho * 2)
                 .attr("fill", fill).attr("stroke", stroke).attr("stroke-width", espBorda);
         } else if (forma === "diamond") {
             const pts = `${x},${y - tamanho} ${x + tamanho},${y} ${x},${y + tamanho} ${x - tamanho},${y}`;
-            this.gRoot.append("polygon")
-                .attr("points", pts)
+            this.gRoot.append("polygon").attr("points", pts)
                 .attr("fill", fill).attr("stroke", stroke).attr("stroke-width", espBorda);
         } else if (forma === "triangle") {
             const pts = `${x},${y - tamanho} ${x + tamanho},${y + tamanho} ${x - tamanho},${y + tamanho}`;
-            this.gRoot.append("polygon")
-                .attr("points", pts)
+            this.gRoot.append("polygon").attr("points", pts)
                 .attr("fill", fill).attr("stroke", stroke).attr("stroke-width", espBorda);
         }
     }
@@ -678,9 +664,7 @@ export class Visual implements IVisual {
         this.gRoot.append("text")
             .attr("x", w / 2).attr("y", h / 2)
             .attr("text-anchor", "middle").attr("dominant-baseline", "central")
-            .attr("font-family", "Segoe UI, sans-serif")
-            .attr("font-size", 13)
-            .attr("fill", "#6B7280")
-            .text(msg);
+            .attr("font-family", "Segoe UI, sans-serif").attr("font-size", 13)
+            .attr("fill", "#6B7280").text(msg);
     }
 }
