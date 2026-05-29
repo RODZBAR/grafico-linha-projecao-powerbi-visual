@@ -3,7 +3,6 @@
   "dataRoles": [
     { "displayName": "Referencia", "name": "referencia", "kind": "GroupingOrMeasure" },
     { "displayName": "Eixo Y (Resultado)", "name": "resultado", "kind": "Measure" },
-    { "displayName": "Cor por Medida DAX (opcional)", "name": "corResultado", "kind": "Measure" },
     { "displayName": "Projecao - Valor", "name": "projecaoValor", "kind": "Measure" },
     { "displayName": "Projecao - Rotulo", "name": "projecaoRotulo", "kind": "GroupingOrMeasure" },
     { "displayName": "Meta", "name": "meta", "kind": "Measure" }
@@ -14,7 +13,6 @@
         {
           "referencia": { "max": 1 },
           "resultado": { "max": 1 },
-          "corResultado": { "max": 1 },
           "projecaoValor": { "max": 1 },
           "projecaoRotulo": { "max": 1 },
           "meta": { "max": 1 }
@@ -28,7 +26,6 @@
         "values": {
           "select": [
             { "bind": { "to": "resultado" } },
-            { "bind": { "to": "corResultado" } },
             { "bind": { "to": "projecaoValor" } },
             { "bind": { "to": "projecaoRotulo" } },
             { "bind": { "to": "meta" } }
@@ -259,8 +256,7 @@
     },
     "diagnostico": {
       "properties": {
-        "exibir": { "type": { "bool": true } },
-        "esconderTip": { "type": { "bool": true } }
+        "exibir": { "type": { "bool": true } }
       }
     },
     "rotulosValor": {

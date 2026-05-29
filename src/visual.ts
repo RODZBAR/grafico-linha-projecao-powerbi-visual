@@ -7,7 +7,7 @@ import { VisualFormattingSettingsModel } from "./settings";
 import { formatarValor, ehNumeroValido, OpcoesFormato, TipoFormato } from "./numberFormatter";
 import { formatarPeriodo } from "./dateFormatter";
 
-const VERSAO_VISUAL = "v1.0.3";
+const VERSAO_VISUAL = "v1.0.4";
 
 import IVisual = powerbi.extensibility.visual.IVisual;
 import VisualConstructorOptions = powerbi.extensibility.visual.VisualConstructorOptions;
@@ -234,7 +234,6 @@ export class Visual implements IVisual {
         const valProjecao = valuePorRole(cat.values, "projecaoValor");
         const valProjecaoRot = valuePorRole(cat.values, "projecaoRotulo");
         const valMeta = valuePorRole(cat.values, "meta");
-        const valCorResultado = valuePorRole(cat.values, "corResultado");
 
         const formatoData = lerEnum(cfg.eixoX.formatoData, "auto");
         const formatoColRef = categoria.source ? categoria.source.format : undefined;
@@ -406,30 +405,10 @@ export class Visual implements IVisual {
         }
 
         // ===== Linha do Resultado =====
-        // Cores: prioridade -> 1) data role "Cor da Linha" (medida)
-        //                     2) fx no painel via conditional formatting
-        //                     3) cor fixa do painel
+        // Cores: 1) fx no painel via conditional formatting (categories.objects ou metadata.objects)
+        //        2) cor fixa do painel (fallback)
         const corResultadoFallback = lerCor(cfg.resultado.cor, "#3B82F6");
-        const { cores: coresFx, algumaPorLinha: algumaFx } = coresPorCategoria(dv, categoria, "resultado", "cor", corResultadoFallback);
-        // Aplica corResultado (data role medida) se existir, sobrescrevendo fx
-        let coresPorIdx: string[] = coresFx.slice();
-        let algumaPorLinha = algumaFx;
-        let origemCor = algumaFx ? "fx (categories.objects)" : "painel fixa";
-        if (valCorResultado) {
-            const n2 = categoria.values.length;
-            const novas: string[] = [];
-            let alguma = false;
-            for (let i = 0; i < n2; i++) {
-                const c = extrairCor(valCorResultado.values[i]);
-                if (c) { alguma = true; novas.push(c); }
-                else novas.push(coresPorIdx[i] || corResultadoFallback);
-            }
-            if (alguma) {
-                coresPorIdx = novas;
-                algumaPorLinha = true;
-                origemCor = "data role 'Cor da Linha'";
-            }
-        }
+        const { cores: coresPorIdx, algumaPorLinha } = coresPorCategoria(dv, categoria, "resultado", "cor", corResultadoFallback);
         const corResultado = coresPorIdx.length > 0 ? coresPorIdx[0] : corResultadoFallback;
         const espResultado = Math.max(0.5, lerNumero(cfg.resultado.espessura, 3));
         const tipoResultado = lerEnum(cfg.resultado.tipoLinha, "solid");
@@ -623,40 +602,7 @@ export class Visual implements IVisual {
 
         // ===== Diagnostico (debug fx) =====
         if (lerBool(cfg.diagnostico.exibir, false)) {
-            this.renderDiagnostico(dv, categoria, coresPorIdx, algumaPorLinha, origemCor, valCorResultado, w);
-        }
-
-        // ===== TIP de orientacao quando data role esta vazio =====
-        // Aparece quando: ha medida configurada na Cor da Linha via fx (sinal de tentativa)
-        // OU sempre que o data role estiver vazio (orientacao).
-        // Pode ser desligada via card "Diagnostico" -> tooltip se quiser.
-        // Aqui apenas mostra se NAO tem data role E tem dados validos.
-        const tipDataRoleVazio = !valCorResultado && ptsValidos.length > 0 && !lerBool(cfg.diagnostico.esconderTip, false);
-        if (tipDataRoleVazio) {
-            const fontSizeTip = 10;
-            const padding = 6;
-            const linhaTip1 = "Cor dinamica via DAX:";
-            const linhaTip2 = "arraste sua medida no campo \"Cor por Medida DAX\"";
-            const larguraEstim = Math.max(linhaTip1.length, linhaTip2.length) * fontSizeTip * 0.6 + padding * 2;
-            const alturaEstim = fontSizeTip * 2 + padding * 2 + 4;
-            const xTip = 6;
-            const yTip = h - alturaEstim - 14; // acima da versao
-            this.gRoot.append("rect")
-                .attr("x", xTip).attr("y", yTip)
-                .attr("width", larguraEstim).attr("height", alturaEstim)
-                .attr("rx", 4).attr("ry", 4)
-                .attr("fill", "rgba(255, 248, 196, 0.92)")
-                .attr("stroke", "#D97706").attr("stroke-width", 0.8);
-            this.gRoot.append("text")
-                .attr("x", xTip + padding).attr("y", yTip + padding + fontSizeTip)
-                .attr("font-family", "Segoe UI, sans-serif").attr("font-size", fontSizeTip)
-                .attr("font-weight", "700").attr("fill", "#92400E")
-                .text(linhaTip1);
-            this.gRoot.append("text")
-                .attr("x", xTip + padding).attr("y", yTip + padding + fontSizeTip * 2 + 2)
-                .attr("font-family", "Segoe UI, sans-serif").attr("font-size", fontSizeTip)
-                .attr("fill", "#92400E")
-                .text(linhaTip2);
+            this.renderDiagnostico(dv, categoria, coresPorIdx, algumaPorLinha, w);
         }
 
         // ===== Versao (sempre visivel no canto, discreta) =====
@@ -673,34 +619,12 @@ export class Visual implements IVisual {
         categoria: DataViewCategoryColumn | null,
         coresPorIdx: string[],
         algumaPorLinha: boolean,
-        origemCor: string,
-        valCorResultado: DataViewValueColumn | null,
         w: number
     ): void {
         const corGlobal = lerCorGlobalDV(dv, "resultado", "cor");
         const objs: any = dv && dv.metadata && (dv.metadata as any).objects;
         const temObjsCategoria = !!(categoria && categoria.objects);
         const qtdComCor = categoria && categoria.objects ? categoria.objects.filter((o: any) => !!o).length : 0;
-
-        // Inspeciona values[i].objects (algumas versoes do PBI armazenam ai)
-        const values: any = dv && dv.categorical && dv.categorical.values;
-        let achouEmValueObjects = false;
-        let valueObjectsInfo = "n/a";
-        if (values && values.length > 0) {
-            const infos: string[] = [];
-            for (let i = 0; i < values.length; i++) {
-                const v = values[i];
-                const role = v && v.source && v.source.roles ? Object.keys(v.source.roles).join("/") : "?";
-                const temObjs = v && v.objects;
-                if (temObjs) {
-                    achouEmValueObjects = true;
-                    infos.push(`${role}.objects[0]=${JSON.stringify(v.objects[0] || null).substring(0, 80)}`);
-                } else {
-                    infos.push(`${role}:no-objs`);
-                }
-            }
-            valueObjectsInfo = infos.join(" | ");
-        }
 
         const amostraCategoria: string[] = [];
         if (categoria && categoria.objects) {
@@ -709,31 +633,15 @@ export class Visual implements IVisual {
             }
         }
 
-        // Status do data role corResultado
-        let dataRoleStatus = "NAO ARRASTADO";
-        if (valCorResultado) {
-            const exemplo = valCorResultado.values[0];
-            dataRoleStatus = `OK - exemplo[0]="${String(exemplo).substring(0, 30)}"`;
-        }
-
-        const ehFallback = origemCor === "painel fixa" && !valCorResultado;
-        const aviso = ehFallback
-            ? ">>> Para COR DINAMICA: aba 'Criar visual' (icone grafico) e arraste sua medida no campo 'Cor por Medida DAX'. O fx do painel NAO funciona (limitacao do PBI)."
-            : "";
-
         const linhas = [
-            `[Diagnostico fx ${VERSAO_VISUAL}]  origem cor: ${origemCor}`,
-            `data role 'Cor por Medida DAX': ${dataRoleStatus}`,
-            aviso,
+            `[Diagnostico fx ${VERSAO_VISUAL}]`,
             `metadata.objects: ${objs ? JSON.stringify(objs).substring(0, 200) : "null"}`,
             `cor global metadata.objects.resultado.cor: ${corGlobal || "null"}`,
             `categoria.objects existe: ${temObjsCategoria} | itens com obj: ${qtdComCor}`,
-            `values com .objects: ${achouEmValueObjects}`,
-            `valueObjectsInfo: ${valueObjectsInfo.substring(0, 220)}`,
             `algumaPorLinha: ${algumaPorLinha}`,
             `cores resultantes [0..4]: ${coresPorIdx.slice(0, 5).join(", ")}`,
             ...amostraCategoria
-        ].filter(s => s.length > 0);
+        ];
         let y = 12;
         const x = 6;
         this.gRoot.append("rect")

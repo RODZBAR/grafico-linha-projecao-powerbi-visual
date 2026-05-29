@@ -290,10 +290,9 @@ class RotulosValorCard extends Card {
 /* =========================== Diagnostico (debug) =========================== */
 class DiagnosticoCard extends Card {
     exibir = toggle("exibir", "Exibir diagnostico do dataView", false);
-    esconderTip = toggle("esconderTip", "Esconder dica do 'Cor por Medida DAX'", false);
     name = "diagnostico";
     displayName = "Diagnostico (debug fx)";
-    slices = [this.exibir, this.esconderTip];
+    slices = [this.exibir];
 }
 
 /* =========================== Modelo =========================== */
