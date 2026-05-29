@@ -3,6 +3,7 @@
   "dataRoles": [
     { "displayName": "Referencia", "name": "referencia", "kind": "GroupingOrMeasure" },
     { "displayName": "Eixo Y (Resultado)", "name": "resultado", "kind": "Measure" },
+    { "displayName": "Cor da Linha (medida)", "name": "corResultado", "kind": "Measure" },
     { "displayName": "Projecao - Valor", "name": "projecaoValor", "kind": "Measure" },
     { "displayName": "Projecao - Rotulo", "name": "projecaoRotulo", "kind": "GroupingOrMeasure" },
     { "displayName": "Meta", "name": "meta", "kind": "Measure" }
@@ -13,6 +14,7 @@
         {
           "referencia": { "max": 1 },
           "resultado": { "max": 1 },
+          "corResultado": { "max": 1 },
           "projecaoValor": { "max": 1 },
           "projecaoRotulo": { "max": 1 },
           "meta": { "max": 1 }
@@ -26,6 +28,7 @@
         "values": {
           "select": [
             { "bind": { "to": "resultado" } },
+            { "bind": { "to": "corResultado" } },
             { "bind": { "to": "projecaoValor" } },
             { "bind": { "to": "projecaoRotulo" } },
             { "bind": { "to": "meta" } }
@@ -135,7 +138,10 @@
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
             "inputRole": "referencia",
-            "output": { "property": "cor" }
+            "output": {
+              "property": "cor",
+              "selector": ["referencia"]
+            }
           }
         },
         "espessura": { "type": { "numeric": true } },
@@ -167,7 +173,10 @@
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
             "inputRole": "referencia",
-            "output": { "property": "cor" }
+            "output": {
+              "property": "cor",
+              "selector": ["referencia"]
+            }
           }
         },
         "espessura": { "type": { "numeric": true } },
@@ -193,7 +202,10 @@
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
             "inputRole": "referencia",
-            "output": { "property": "cor" }
+            "output": {
+              "property": "cor",
+              "selector": ["referencia"]
+            }
           }
         },
         "espessura": { "type": { "numeric": true } },
@@ -263,7 +275,10 @@
           "type": { "fill": { "solid": { "color": true } } },
           "rule": {
             "inputRole": "referencia",
-            "output": { "property": "cor" }
+            "output": {
+              "property": "cor",
+              "selector": ["referencia"]
+            }
           }
         },
         "deslocamentoY": { "type": { "numeric": true } },

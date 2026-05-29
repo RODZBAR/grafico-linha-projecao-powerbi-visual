@@ -232,6 +232,7 @@ export class Visual implements IVisual {
         const valProjecao = valuePorRole(cat.values, "projecaoValor");
         const valProjecaoRot = valuePorRole(cat.values, "projecaoRotulo");
         const valMeta = valuePorRole(cat.values, "meta");
+        const valCorResultado = valuePorRole(cat.values, "corResultado");
 
         const formatoData = lerEnum(cfg.eixoX.formatoData, "auto");
         const formatoColRef = categoria.source ? categoria.source.format : undefined;
@@ -402,9 +403,31 @@ export class Visual implements IVisual {
             }
         }
 
-        // ===== Linha do Resultado (com cores por ponto se fx) =====
+        // ===== Linha do Resultado =====
+        // Cores: prioridade -> 1) data role "Cor da Linha" (medida)
+        //                     2) fx no painel via conditional formatting
+        //                     3) cor fixa do painel
         const corResultadoFallback = lerCor(cfg.resultado.cor, "#3B82F6");
-        const { cores: coresPorIdx, algumaPorLinha } = coresPorCategoria(dv, categoria, "resultado", "cor", corResultadoFallback);
+        const { cores: coresFx, algumaPorLinha: algumaFx } = coresPorCategoria(dv, categoria, "resultado", "cor", corResultadoFallback);
+        // Aplica corResultado (data role medida) se existir, sobrescrevendo fx
+        let coresPorIdx: string[] = coresFx.slice();
+        let algumaPorLinha = algumaFx;
+        let origemCor = algumaFx ? "fx (categories.objects)" : "painel fixa";
+        if (valCorResultado) {
+            const n2 = categoria.values.length;
+            const novas: string[] = [];
+            let alguma = false;
+            for (let i = 0; i < n2; i++) {
+                const c = extrairCor(valCorResultado.values[i]);
+                if (c) { alguma = true; novas.push(c); }
+                else novas.push(coresPorIdx[i] || corResultadoFallback);
+            }
+            if (alguma) {
+                coresPorIdx = novas;
+                algumaPorLinha = true;
+                origemCor = "data role 'Cor da Linha'";
+            }
+        }
         const corResultado = coresPorIdx.length > 0 ? coresPorIdx[0] : corResultadoFallback;
         const espResultado = Math.max(0.5, lerNumero(cfg.resultado.espessura, 3));
         const tipoResultado = lerEnum(cfg.resultado.tipoLinha, "solid");
@@ -598,33 +621,72 @@ export class Visual implements IVisual {
 
         // ===== Diagnostico (debug fx) =====
         if (lerBool(cfg.diagnostico.exibir, false)) {
-            this.renderDiagnostico(dv, categoria, coresPorIdx, algumaPorLinha, w);
+            this.renderDiagnostico(dv, categoria, coresPorIdx, algumaPorLinha, origemCor, valCorResultado, w);
         }
     }
 
-    private renderDiagnostico(dv: DataView, categoria: DataViewCategoryColumn | null, coresPorIdx: string[], algumaPorLinha: boolean, w: number): void {
+    private renderDiagnostico(
+        dv: DataView,
+        categoria: DataViewCategoryColumn | null,
+        coresPorIdx: string[],
+        algumaPorLinha: boolean,
+        origemCor: string,
+        valCorResultado: DataViewValueColumn | null,
+        w: number
+    ): void {
         const corGlobal = lerCorGlobalDV(dv, "resultado", "cor");
         const objs: any = dv && dv.metadata && (dv.metadata as any).objects;
         const temObjsCategoria = !!(categoria && categoria.objects);
         const qtdComCor = categoria && categoria.objects ? categoria.objects.filter((o: any) => !!o).length : 0;
+
+        // Inspeciona values[i].objects (algumas versoes do PBI armazenam ai)
+        const values: any = dv && dv.categorical && dv.categorical.values;
+        let achouEmValueObjects = false;
+        let valueObjectsInfo = "n/a";
+        if (values && values.length > 0) {
+            const infos: string[] = [];
+            for (let i = 0; i < values.length; i++) {
+                const v = values[i];
+                const role = v && v.source && v.source.roles ? Object.keys(v.source.roles).join("/") : "?";
+                const temObjs = v && v.objects;
+                if (temObjs) {
+                    achouEmValueObjects = true;
+                    infos.push(`${role}.objects[0]=${JSON.stringify(v.objects[0] || null).substring(0, 80)}`);
+                } else {
+                    infos.push(`${role}:no-objs`);
+                }
+            }
+            valueObjectsInfo = infos.join(" | ");
+        }
+
         const amostraCategoria: string[] = [];
         if (categoria && categoria.objects) {
             for (let i = 0; i < Math.min(3, categoria.objects.length); i++) {
-                amostraCategoria.push(`[${i}]=` + JSON.stringify(categoria.objects[i] || null).substring(0, 120));
+                amostraCategoria.push(`cat.obj[${i}]=` + JSON.stringify(categoria.objects[i] || null).substring(0, 120));
             }
         }
+
+        // Status do data role corResultado
+        let dataRoleStatus = "nao arrastado";
+        if (valCorResultado) {
+            const exemplo = valCorResultado.values[0];
+            dataRoleStatus = `OK - exemplo[0]="${String(exemplo).substring(0, 30)}"`;
+        }
+
         const linhas = [
-            `[Diagnostico fx]`,
+            `[Diagnostico fx]  origem cor: ${origemCor}`,
+            `data role 'Cor da Linha (medida)': ${dataRoleStatus}`,
             `metadata.objects: ${objs ? JSON.stringify(objs).substring(0, 200) : "null"}`,
-            `cor global (metadata.objects.resultado.cor): ${corGlobal || "null"}`,
+            `cor global metadata.objects.resultado.cor: ${corGlobal || "null"}`,
             `categoria.objects existe: ${temObjsCategoria} | itens com obj: ${qtdComCor}`,
+            `values com .objects: ${achouEmValueObjects}`,
+            `valueObjectsInfo: ${valueObjectsInfo.substring(0, 220)}`,
             `algumaPorLinha: ${algumaPorLinha}`,
-            `cores resultantes [0..2]: ${coresPorIdx.slice(0, 3).join(", ")}`,
+            `cores resultantes [0..4]: ${coresPorIdx.slice(0, 5).join(", ")}`,
             ...amostraCategoria
         ];
         let y = 12;
         const x = 6;
-        // Fundo semi-transparente para legibilidade
         this.gRoot.append("rect")
             .attr("x", x - 2).attr("y", 2)
             .attr("width", Math.max(280, w - 12)).attr("height", linhas.length * 12 + 4)
