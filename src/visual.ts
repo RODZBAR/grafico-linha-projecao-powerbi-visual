@@ -127,6 +127,54 @@ function opcoesFormatoDeCard(card: any): OpcoesFormato {
     };
 }
 
+// ============= Leitura de cores calculadas pelo fx do Power BI =============
+// Quando o usuario aplica regra/medida/gradiente via fx, o PBI envia a cor
+// calculada em locais diferentes do dataView. Estas funcoes tentam encontrar.
+
+function extrairCor(o: any): string | null {
+    if (o === null || o === undefined) return null;
+    if (typeof o === "string" && o.length > 0) return o;
+    if (typeof o === "object") {
+        if (o.solid && typeof o.solid.color === "string") return o.solid.color;
+        if (typeof o.color === "string") return o.color;
+        if (typeof o.value === "string") return o.value;
+    }
+    return null;
+}
+
+// Cor "global" calculada: metadata.objects.<objName>.<propName>
+function lerCorGlobalDV(dv: DataView, objectName: string, propertyName: string): string | null {
+    const objs: any = dv && dv.metadata && (dv.metadata as any).objects;
+    return extrairCor(objs && objs[objectName] && objs[objectName][propertyName]);
+}
+
+// Cor por linha (gradient/cor por valor): row.objects.<objName>.<propName>
+function lerCorRow(row: any, objectName: string, propertyName: string): string | null {
+    if (!row || !row.objects) return null;
+    const obj = row.objects[objectName];
+    if (!obj) return null;
+    return extrairCor(obj[propertyName]);
+}
+
+// Resolve a cor "global" (constante, regra, medida) com fallback
+function resolverCor(dv: DataView, objectName: string, propertyName: string, fallback: string): string {
+    return lerCorGlobalDV(dv, objectName, propertyName) || fallback;
+}
+
+// Cores por ponto: para cada linha do dataView retorna a cor calculada.
+// Se nao houver cor por linha, usa a cor global. Se nao houver, fallback.
+function coresPorPonto(dv: DataView, objectName: string, propertyName: string, fallback: string): { cores: string[]; algumaPorLinha: boolean } {
+    const rows = (dv && dv.table && dv.table.rows) || [];
+    const corGlobal = lerCorGlobalDV(dv, objectName, propertyName) || fallback;
+    let algumaPorLinha = false;
+    const cores = rows.map(r => {
+        const c = lerCorRow(r, objectName, propertyName);
+        if (c) { algumaPorLinha = true; return c; }
+        return corGlobal;
+    });
+    return { cores, algumaPorLinha };
+}
+
 export class Visual implements IVisual {
     private host: IVisualHost;
     private target: HTMLElement;
@@ -329,7 +377,7 @@ export class Visual implements IVisual {
             if (valoresMeta.length > 0) {
                 const metaValor = valoresMeta[0];
                 const yMeta = escalaY(metaValor);
-                const corMeta = lerCor(cfg.meta.cor, "#9CA3AF");
+                const corMeta = resolverCor(dv, "meta", "cor", lerCor(cfg.meta.cor, "#9CA3AF"));
                 const espMeta = Math.max(0.5, lerNumero(cfg.meta.espessura, 2));
                 const tipoMeta = lerEnum(cfg.meta.tipoLinha, "dash");
                 this.gRoot.append("line")
@@ -374,8 +422,10 @@ export class Visual implements IVisual {
             }
         }
 
-        // ===== Linha do Resultado =====
-        const corResultado = lerCor(cfg.resultado.cor, "#3B82F6");
+        // ===== Linha do Resultado (com suporte a fx: cores por ponto) =====
+        const corResultadoFallback = lerCor(cfg.resultado.cor, "#3B82F6");
+        const { cores: coresPorIdx, algumaPorLinha } = coresPorPonto(dv, "resultado", "cor", corResultadoFallback);
+        const corResultado = coresPorIdx.length > 0 ? coresPorIdx[coresPorIdx.length - 1] : corResultadoFallback;
         const espResultado = Math.max(0.5, lerNumero(cfg.resultado.espessura, 3));
         const tipoResultado = lerEnum(cfg.resultado.tipoLinha, "solid");
         const curvaResultado = lerEnum(cfg.resultado.curva, "linear");
@@ -388,18 +438,44 @@ export class Visual implements IVisual {
 
         const ptsValidos = pontos
             .filter(p => p.valor !== null)
-            .map(p => ({ x: escalaX(p.rotuloEixoX) || 0, y: escalaY(p.valor!), v: p.valor!, rotulo: p.rotuloEixoX }));
+            .map(p => ({
+                x: escalaX(p.rotuloEixoX) || 0,
+                y: escalaY(p.valor!),
+                v: p.valor!,
+                rotulo: p.rotuloEixoX,
+                idx: p.indice,
+                cor: coresPorIdx[p.indice] || corResultadoFallback
+            }));
+
+        const coresDiferentes = algumaPorLinha && ptsValidos.length > 1 && ptsValidos.some(p => p.cor !== ptsValidos[0].cor);
 
         if (ptsValidos.length > 0) {
-            this.gRoot.append("path")
-                .datum(ptsValidos)
-                .attr("fill", "none")
-                .attr("stroke", corResultado)
-                .attr("stroke-width", espResultado)
-                .attr("stroke-dasharray", dashArray(tipoResultado, espResultado))
-                .attr("stroke-linecap", "round")
-                .attr("stroke-linejoin", "round")
-                .attr("d", lineGen(ptsValidos));
+            if (coresDiferentes) {
+                // Renderiza por segmentos retos com cor de cada ponto (perde a curva, mas mostra gradient/regra)
+                for (let i = 0; i < ptsValidos.length - 1; i++) {
+                    const a = ptsValidos[i];
+                    const b = ptsValidos[i + 1];
+                    this.gRoot.append("line")
+                        .attr("x1", a.x).attr("y1", a.y)
+                        .attr("x2", b.x).attr("y2", b.y)
+                        .attr("stroke", a.cor)
+                        .attr("stroke-width", espResultado)
+                        .attr("stroke-dasharray", dashArray(tipoResultado, espResultado))
+                        .attr("stroke-linecap", "round")
+                        .attr("stroke-linejoin", "round");
+                }
+            } else {
+                // Path unico com cor constante (cor unica calculada ou cor do painel)
+                this.gRoot.append("path")
+                    .datum(ptsValidos)
+                    .attr("fill", "none")
+                    .attr("stroke", corResultado)
+                    .attr("stroke-width", espResultado)
+                    .attr("stroke-dasharray", dashArray(tipoResultado, espResultado))
+                    .attr("stroke-linecap", "round")
+                    .attr("stroke-linejoin", "round")
+                    .attr("d", lineGen(ptsValidos));
+            }
         }
 
         // ===== Marcadores =====
@@ -409,7 +485,7 @@ export class Visual implements IVisual {
             const preencher = lerBool(cfg.marcadores.preencher, true);
             const espBorda = Math.max(0, lerNumero(cfg.marcadores.espessuraBorda, 1.5));
             for (const p of ptsValidos) {
-                this.desenharMarcador(p.x, p.y, tamMarc, forma, corResultado, preencher, espBorda);
+                this.desenharMarcador(p.x, p.y, tamMarc, forma, p.cor, preencher, espBorda);
             }
         }
 
@@ -420,7 +496,7 @@ export class Visual implements IVisual {
             const xProj = escalaX(projecao.rotulo) || 0;
             const yProj = escalaY(projecao.valorNumerico);
 
-            const corProj = lerCor(cfg.projecao.cor, corResultado);
+            const corProj = resolverCor(dv, "projecao", "cor", lerCor(cfg.projecao.cor, corResultado));
             const espProj = Math.max(0.5, lerNumero(cfg.projecao.espessura, 3));
             const tipoProj = lerEnum(cfg.projecao.tipoLinha, "dash");
 
@@ -455,7 +531,7 @@ export class Visual implements IVisual {
             const optsRot = opcoesFormatoDeCard(cfg.rotulosValor);
             const apenasUlt = lerBool(cfg.rotulosValor.exibirApenasUltimo, false);
             const desY = lerNumero(cfg.rotulosValor.deslocamentoY, -10);
-            const corRot = lerCor(cfg.rotulosValor.cor, "#111827");
+            const corRot = resolverCor(dv, "rotulosValor", "cor", lerCor(cfg.rotulosValor.cor, "#111827"));
             const family = lerFonte(cfg.rotulosValor.fontFamily, "Segoe UI, sans-serif");
             const size = lerNumero(cfg.rotulosValor.fontSize, 11);
             const peso = lerBool(cfg.rotulosValor.fontBold, true) ? "700" : "400";
