@@ -259,7 +259,8 @@
     },
     "diagnostico": {
       "properties": {
-        "exibir": { "type": { "bool": true } }
+        "exibir": { "type": { "bool": true } },
+        "esconderTip": { "type": { "bool": true } }
       }
     },
     "rotulosValor": {

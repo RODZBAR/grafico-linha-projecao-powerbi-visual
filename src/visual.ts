@@ -7,7 +7,7 @@ import { VisualFormattingSettingsModel } from "./settings";
 import { formatarValor, ehNumeroValido, OpcoesFormato, TipoFormato } from "./numberFormatter";
 import { formatarPeriodo } from "./dateFormatter";
 
-const VERSAO_VISUAL = "v1.0.2";
+const VERSAO_VISUAL = "v1.0.3";
 
 import IVisual = powerbi.extensibility.visual.IVisual;
 import VisualConstructorOptions = powerbi.extensibility.visual.VisualConstructorOptions;
@@ -626,6 +626,39 @@ export class Visual implements IVisual {
             this.renderDiagnostico(dv, categoria, coresPorIdx, algumaPorLinha, origemCor, valCorResultado, w);
         }
 
+        // ===== TIP de orientacao quando data role esta vazio =====
+        // Aparece quando: ha medida configurada na Cor da Linha via fx (sinal de tentativa)
+        // OU sempre que o data role estiver vazio (orientacao).
+        // Pode ser desligada via card "Diagnostico" -> tooltip se quiser.
+        // Aqui apenas mostra se NAO tem data role E tem dados validos.
+        const tipDataRoleVazio = !valCorResultado && ptsValidos.length > 0 && !lerBool(cfg.diagnostico.esconderTip, false);
+        if (tipDataRoleVazio) {
+            const fontSizeTip = 10;
+            const padding = 6;
+            const linhaTip1 = "Cor dinamica via DAX:";
+            const linhaTip2 = "arraste sua medida no campo \"Cor por Medida DAX\"";
+            const larguraEstim = Math.max(linhaTip1.length, linhaTip2.length) * fontSizeTip * 0.6 + padding * 2;
+            const alturaEstim = fontSizeTip * 2 + padding * 2 + 4;
+            const xTip = 6;
+            const yTip = h - alturaEstim - 14; // acima da versao
+            this.gRoot.append("rect")
+                .attr("x", xTip).attr("y", yTip)
+                .attr("width", larguraEstim).attr("height", alturaEstim)
+                .attr("rx", 4).attr("ry", 4)
+                .attr("fill", "rgba(255, 248, 196, 0.92)")
+                .attr("stroke", "#D97706").attr("stroke-width", 0.8);
+            this.gRoot.append("text")
+                .attr("x", xTip + padding).attr("y", yTip + padding + fontSizeTip)
+                .attr("font-family", "Segoe UI, sans-serif").attr("font-size", fontSizeTip)
+                .attr("font-weight", "700").attr("fill", "#92400E")
+                .text(linhaTip1);
+            this.gRoot.append("text")
+                .attr("x", xTip + padding).attr("y", yTip + padding + fontSizeTip * 2 + 2)
+                .attr("font-family", "Segoe UI, sans-serif").attr("font-size", fontSizeTip)
+                .attr("fill", "#92400E")
+                .text(linhaTip2);
+        }
+
         // ===== Versao (sempre visivel no canto, discreta) =====
         this.gRoot.append("text")
             .attr("x", w - 4).attr("y", h - 2)
@@ -677,15 +710,21 @@ export class Visual implements IVisual {
         }
 
         // Status do data role corResultado
-        let dataRoleStatus = "nao arrastado";
+        let dataRoleStatus = "NAO ARRASTADO";
         if (valCorResultado) {
             const exemplo = valCorResultado.values[0];
             dataRoleStatus = `OK - exemplo[0]="${String(exemplo).substring(0, 30)}"`;
         }
 
+        const ehFallback = origemCor === "painel fixa" && !valCorResultado;
+        const aviso = ehFallback
+            ? ">>> Para COR DINAMICA: aba 'Criar visual' (icone grafico) e arraste sua medida no campo 'Cor por Medida DAX'. O fx do painel NAO funciona (limitacao do PBI)."
+            : "";
+
         const linhas = [
-            `[Diagnostico fx]  origem cor: ${origemCor}`,
-            `data role 'Cor da Linha (medida)': ${dataRoleStatus}`,
+            `[Diagnostico fx ${VERSAO_VISUAL}]  origem cor: ${origemCor}`,
+            `data role 'Cor por Medida DAX': ${dataRoleStatus}`,
+            aviso,
             `metadata.objects: ${objs ? JSON.stringify(objs).substring(0, 200) : "null"}`,
             `cor global metadata.objects.resultado.cor: ${corGlobal || "null"}`,
             `categoria.objects existe: ${temObjsCategoria} | itens com obj: ${qtdComCor}`,
@@ -694,7 +733,7 @@ export class Visual implements IVisual {
             `algumaPorLinha: ${algumaPorLinha}`,
             `cores resultantes [0..4]: ${coresPorIdx.slice(0, 5).join(", ")}`,
             ...amostraCategoria
-        ];
+        ].filter(s => s.length > 0);
         let y = 12;
         const x = 6;
         this.gRoot.append("rect")
